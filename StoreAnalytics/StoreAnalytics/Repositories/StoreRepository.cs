@@ -1,3 +1,4 @@
+using System.ComponentModel.DataAnnotations;
 using System.Diagnostics;
 using Dapper;
 using Microsoft.EntityFrameworkCore;
@@ -126,10 +127,14 @@ public class StoreRepository
 
                 return response;
             }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Top customers revenue query failed.");
-                return [];
+                throw;
             }
         }
     }
@@ -162,77 +167,87 @@ public class StoreRepository
 
     public async Task<CreateOrderResult> CreateOrder(CreateOrderRequest request, CancellationToken cancellationToken)
     {
-        await using (IDbContextTransaction transaction = await _dbContext.Database.BeginTransactionAsync(cancellationToken))
+        cancellationToken.ThrowIfCancellationRequested();
+        ValidationResult? validationError = request.Validate(new ValidationContext(request)).FirstOrDefault();
+        if (validationError is not null)
+            return new CreateOrderResult(false, Error: validationError.ErrorMessage,
+                ErrorCode: CreateOrderError.InvalidRequest);
+
+        await using IDbContextTransaction transaction = await _dbContext.Database.BeginTransactionAsync(cancellationToken);
+        try
+        {
+            if (!await _dbContext.Customers.AnyAsync(c => c.CustomerId == request.CustomerId, cancellationToken))
+                return new CreateOrderResult(false, Error: "No customer with such an ID was found.",
+                    ErrorCode: CreateOrderError.CustomerNotFound);
+
+            Orders order = new Orders
+            {
+                OrderId = Guid.NewGuid(),
+                CustomerId = request.CustomerId,
+                OrderDate = DateTimeOffset.UtcNow
+            };
+
+            List<OrderItemDto> createdOrderItems = [];
+            
+            foreach (CreateOrderItemRequest item in request.OrderItems.OrderBy(i => i.ProductId))
+            {
+                int updated = await _dbContext.Products
+                    .Where(p => p.ProductId == item.ProductId && p.Quantity >= item.Quantity)
+                    .ExecuteUpdateAsync(setters => setters.SetProperty(p => p.Quantity, p => p.Quantity - item.Quantity),
+                        cancellationToken);
+
+                if (updated == 0)
+                {
+                    bool exists = await _dbContext.Products.AnyAsync(p => p.ProductId == item.ProductId, cancellationToken);
+                    return exists
+                        ? new CreateOrderResult(false, Error: "Quantity of the product has been exceeded.",
+                            ErrorCode: CreateOrderError.InsufficientStock)
+                        : new CreateOrderResult(false, Error: "The product with that ID was not found.",
+                            ErrorCode: CreateOrderError.ProductNotFound);
+                }
+                
+                var product = await _dbContext.Products.AsNoTracking()
+                    .Where(p => p.ProductId == item.ProductId)
+                    .Select(p => new { p.Name, p.Price })
+                    .SingleAsync(cancellationToken);
+
+                OrderItems orderItem = new OrderItems
+                {
+                    OrderId = order.OrderId,
+                    Order = order,
+                    ProductId = item.ProductId,
+                    Quantity = item.Quantity,
+                    Price = product.Price
+                };
+
+                order.OrderItems.Add(orderItem);
+                createdOrderItems.Add(new OrderItemDto(product.Name, orderItem.Quantity, orderItem.Price));
+            }
+
+            _dbContext.Orders.Add(order);
+            await _dbContext.SaveChangesAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+
+            OrdersDto createdOrder = new OrdersDto(
+                order.OrderId,
+                order.CustomerId,
+                order.OrderDate,
+                createdOrderItems.ToArray());
+
+            return new CreateOrderResult(true, createdOrder);
+        }
+        catch
         {
             try
             {
-                if (request.CustomerId == Guid.Empty)
-                {
-                    throw new Exception("CustomerId can't be empty");
-                }
-
-                if (!await _dbContext.Customers.AnyAsync(c => c.CustomerId == request.CustomerId, cancellationToken))
-                {
-                    throw new Exception("No customer with such an ID was found");
-                }
-
-                Orders order = new Orders
-                {
-                    OrderId = Guid.NewGuid(),
-                    CustomerId = request.CustomerId,
-                    OrderDate = DateTimeOffset.UtcNow
-                };
-
-                List<OrderItemDto> createdOrderItems = new List<OrderItemDto>();
-
-                foreach (CreateOrderItemRequest orderItemRequest in request.OrderItems)
-                {
-                    Products? product = await _dbContext.Products.FirstOrDefaultAsync(
-                        p => p.ProductId == orderItemRequest.ProductId,
-                        cancellationToken);
-
-                    if (product is null)
-                    {
-                        throw new Exception("The product with that ID was not found.");
-                    }
-
-                    if (product.Quantity < orderItemRequest.Quantity)
-                    {
-                        throw new Exception("Quantity of the product has been exceeded.");
-                    }
-
-                    OrderItems orderItem = new OrderItems
-                    {
-                        OrderId = order.OrderId,
-                        Order = order,
-                        ProductId = orderItemRequest.ProductId,
-                        Quantity = orderItemRequest.Quantity,
-                        Price = product.Price
-                    };
-
-                    order.OrderItems.Add(orderItem);
-                    _dbContext.OrderItems.Add(orderItem);
-                    createdOrderItems.Add(new OrderItemDto(product.Name, orderItem.Quantity, orderItem.Price));
-                }
-
-                _dbContext.Orders.Add(order);
-                await _dbContext.SaveChangesAsync(cancellationToken);
-                await transaction.CommitAsync(cancellationToken);
-
-                OrdersDto createdOrder = new OrdersDto(
-                    order.OrderId,
-                    order.CustomerId,
-                    order.OrderDate,
-                    createdOrderItems.ToArray());
-
-                return new CreateOrderResult(true, createdOrder);
+                await transaction.RollbackAsync(CancellationToken.None);
             }
-            catch (Exception e)
+            catch (Exception rollbackException)
             {
-                _logger.LogError(e, "Order creation failed.");
-                await transaction.RollbackAsync(cancellationToken);
-                return new CreateOrderResult(false, null, e.Message);
+                _logger.LogWarning(rollbackException, "Order rollback failed.");
             }
+
+            throw;
         }
     }
 }

@@ -12,6 +12,7 @@ public class OrdersConfiguration : IEntityTypeConfiguration<Orders>
 
         builder.Property(o => o.CustomerId).IsRequired();
         builder.Property(o => o.OrderDate).IsRequired();
+        
         builder.HasIndex(o => o.OrderDate)
             .HasDatabaseName("IX_Orders_OrderDate_Report")
             .IncludeProperties(o => new { o.OrderId, o.CustomerId });

@@ -48,6 +48,14 @@ public class StoreControllers : ControllerBase
             return Ok(result.Order);
         }
 
-        return BadRequest(new { error = result.Error });
+        int status = result.ErrorCode switch
+        {
+            CreateOrderError.InvalidRequest => StatusCodes.Status400BadRequest,
+            CreateOrderError.CustomerNotFound or CreateOrderError.ProductNotFound => StatusCodes.Status404NotFound,
+            CreateOrderError.InsufficientStock => StatusCodes.Status409Conflict,
+            _ => StatusCodes.Status500InternalServerError
+        };
+
+        return Problem(statusCode: status, detail: result.Error);
     }
 }

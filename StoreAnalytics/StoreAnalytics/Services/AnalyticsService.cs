@@ -35,7 +35,7 @@ public class AnalyticsService
 
     public async Task<List<OrdersDto>> GetCustomerOrders(Guid customerId, CancellationToken cancellationToken)
     {
-        //return await _storeRepository.GetCustomerOrdersNaively(customerId, cancellationToken);
+       // return await _storeRepository.GetCustomerOrdersNaively(customerId, cancellationToken);
         return await _storeRepository.GetCustomerOrders(customerId, cancellationToken);
     }
 

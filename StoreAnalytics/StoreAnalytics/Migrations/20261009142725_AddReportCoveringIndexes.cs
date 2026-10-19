@@ -1,4 +1,4 @@
-using Microsoft.EntityFrameworkCore.Migrations;
+﻿using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
 
@@ -22,7 +22,7 @@ namespace StoreAnalytics.Migrations
                     column: "OrderDate")
                 .Annotation("Npgsql:IndexInclude", new[] { "OrderId", "CustomerId" });
         }
-
+        
         /// <inheritdoc />
         protected override void Down(MigrationBuilder migrationBuilder)
         {

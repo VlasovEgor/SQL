@@ -26,7 +26,7 @@ public class OrderItemConfiguration : IEntityTypeConfiguration<OrderItems>
             .WithMany(p => p.OrderItems)
             .HasForeignKey(oi => oi.ProductId);
 
-        builder.ToTable(table => table.HasCheckConstraint("CK_Order_Items_Quantity_Min", "\"Quantity\" >= 0"));
+        builder.ToTable(table => table.HasCheckConstraint("CK_Order_Items_Quantity_Min", "\"Quantity\" > 0"));
         builder.ToTable(table => table.HasCheckConstraint("CK_Order_Items_Price_Min", "\"Price\">= 0"));
     }
 }

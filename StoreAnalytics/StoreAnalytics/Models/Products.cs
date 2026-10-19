@@ -13,9 +13,9 @@ public class Products
         get => _quantity;
         set
         {
-            if (value <= 0)
+            if (value < 0)
             {
-                throw new ArgumentOutOfRangeException(nameof(value), "Value cannot be less than or equal to 0");
+                throw new ArgumentOutOfRangeException(nameof(value), "Value cannot be less than 0");
             }
 
             _quantity = value;
@@ -27,9 +27,9 @@ public class Products
         get => _price;
         set
         {
-            if (value <= 0)
+            if (value < 0)
             {
-                throw new ArgumentOutOfRangeException(nameof(value), "Value cannot be less than or equal to 0");
+                throw new ArgumentOutOfRangeException(nameof(value), "Value cannot be less than 0");
             }
 
             _price = value;

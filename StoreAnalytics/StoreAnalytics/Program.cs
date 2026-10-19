@@ -9,6 +9,8 @@ var builder = WebApplication.CreateBuilder(args);
 // Add services to the container.
 
 builder.Services.AddControllers();
+builder.Services.AddProblemDetails();
+builder.Services.AddExceptionHandler<ApiExceptionHandler>();
 // Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
@@ -35,6 +37,7 @@ builder.Services.AddScoped<StoreRepository>();
 builder.Services.AddScoped<AnalyticsService>();
 
 var app = builder.Build();
+app.UseExceptionHandler();
 
 // Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment())
@@ -55,5 +58,6 @@ using (IServiceScope scope = app.Services.CreateScope())
 
     await DbSeeder.SeedAsync(dbContext);
 }
+
 
 app.Run();
