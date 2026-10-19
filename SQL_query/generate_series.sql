@@ -1,44 +1,107 @@
-INSERT INTO customers(first_name, last_name, email)
-SELECT 
-	'first_name_' || num,
-	'last_name_' || num,
-	'email' || num || '@gamil.com'
-FROM generate_series(1, 1000) AS num;
+SELECT customers_id, first_name, SUM(quantity * price)
+FROM customers
+JOIN orders USING (customers_id)
+JOIN order_item USING (orders_id)
+GROUP BY (customers_id)
+ORDER BY SUM(quantity * price) DESC
+LIMIT 10;
 
-select * from customers;
+SELECT DATE_TRUNC('month', created_at) AS monthly_revenue,
+       SUM(quantity * price)
+FROM orders
+JOIN order_item USING (orders_id)
+WHERE created_at > CURRENT_TIMESTAMP - INTERVAL '1 year'
+GROUP BY monthly_revenue
+ORDER BY monthly_revenue;
 
-INSERT INTO products(quantity, price, category)
-SELECT 
-	floor(random() * 1000) + 1 :: int,
-	floor(random() * 1000),
-	'category_' || floor(random() * 10)
-FROM generate_series(1, 200);
+SELECT *
+FROM customers
+LEFT JOIN orders USING (customers_id)
+WHERE orders_id IS NULL;
 
-select * from products;
+SELECT *
+FROM customers
+WHERE NOT EXISTS (
+    SELECT 1
+    FROM orders
+    WHERE orders.customers_id = customers.customers_id
+);
 
-INSERT INTO orders(customers_id, created_at)
-SELECT 
-	(floor(random() * 1000) + 1) :: int,
-	'2020-01-01 00:00:00+03'::TIMESTAMPTZ + RANDOM() * (TIMESTAMPTZ '2026-09-23 23:59:59+03' - TIMESTAMPTZ '2020-01-01 00:00:00+03') AS random_timestamptz
-FROM generate_series(1, 10000);
+SELECT customers_id, AVG(order_total)
+FROM (
+    SELECT customers_id, orders_id, SUM(price * quantity) AS order_total
+    FROM orders
+    JOIN order_item USING (orders_id)
+    GROUP BY customers_id, orders_id
+)
+GROUP BY customers_id
+HAVING AVG(order_total) > 5000;
 
-select * from orders;
+SELECT customers_id, orders_id,
+       ROW_NUMBER() OVER (PARTITION BY customers_id ORDER BY created_at)
+FROM orders;
 
+SELECT *
+FROM (
+    SELECT products_id, category, order_total,
+           RANK() OVER (PARTITION BY category ORDER BY order_total DESC) AS rnk
+    FROM (
+        SELECT products_id, category,
+               SUM(order_item.price * order_item.quantity) AS order_total
+        FROM order_item
+        JOIN products USING (products_id)
+        GROUP BY products_id, category
+    )
+)
+WHERE rnk <= 3;
 
-INSERT INTO order_item(orders_id, products_id, quantity, price)
-SELECT
-    o.orders_id,
-    p.products_id,
-    (floor(random() * 10) + 1)::int,
-    p.price
-	
-FROM orders o
-CROSS JOIN products p
-ORDER BY random()
-LIMIT 30000;
+EXPLAIN ANALYZE
+SELECT *
+FROM orders
+WHERE customers_id = 496
+  AND created_at BETWEEN '2024-01-01' AND '2026-01-01';
 
-select * from order_item;
+CREATE INDEX ix_orders_customer_created
+ON orders (customers_id, created_at);
 
-UPDATE order_item
-SET quantity = (floor(random() * 10) + 1)::int;
+DROP INDEX ix_orders_customer_created;
 
+CREATE INDEX idx_customers_email
+ON customers (email);
+
+EXPLAIN ANALYZE
+SELECT *
+FROM customers
+WHERE email LIKE '%123%';
+
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
+
+CREATE INDEX idx_customers_email_trgm
+ON customers
+USING GIN (email gin_trgm_ops);
+
+SELECT *
+FROM customers
+LIMIT 3;
+
+DO $$
+DECLARE
+    v_balance_1 DECIMAL;
+BEGIN
+    SELECT balance INTO v_balance_1
+    FROM customers
+    WHERE customers_id = 1
+    FOR UPDATE;
+
+    IF v_balance_1 < 1000 THEN
+        RAISE EXCEPTION 'На счете недостаточно средств';
+    ELSE
+        UPDATE customers
+        SET balance = balance - 1000
+        WHERE customers_id = 1;
+
+        UPDATE customers
+        SET balance = balance + 1000
+        WHERE customers_id = 2;
+    END IF;
+END $$;
